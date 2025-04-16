@@ -11,8 +11,19 @@ def detect_moves():
         audio = r.listen(source, phrase_time_limit=20)
 
     try:
-        mov = r.recognize_google(audio)
+        mov = r.recognize_sphinx(audio)
         print(f"Recognized Speech: {mov}")
+        replacements = {
+            "one": "1", "two": "2", "three": "3", "four": "4",
+            "five": "5", "six": "6", "seven": "7", "eight": "8"
+        }
+
+        for word, num in replacements.items():
+            mov = mov.replace(f" {word}", num)  # replace " e two" with "e2"
+            mov = mov.replace(word, num)
+
+        print(f"New Recognized Speech: {mov}")
+
         if (mov == "robots"):
             return mov
         else:       
