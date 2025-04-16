@@ -12,7 +12,7 @@ def detect_moves():
 
     try:
         mov = r.recognize_sphinx(audio)
-        print(f"Recognized Speech: {mov}")
+
         replacements = {
             "one": "1", "two": "2", "three": "3", "four": "4",
             "five": "5", "six": "6", "seven": "7", "eight": "8"
