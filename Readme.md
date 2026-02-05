@@ -42,7 +42,7 @@
     - Play against chess bot. Right now, both players type moves.
           - The python chess library supports generating moves from an engine given the current board state. This would be very helpful for implementing this.
 
-## AI Project Status Summary I guess:
+## Project Status Summary I guess via Chat GPT:
 Current Status: The "Open Loop" System
 Project currently functions as an "open-loop" system. This means the central computer can calculate moves and tell robots what to do, but it has no way of knowing if the robots actually did it correctly.
 
