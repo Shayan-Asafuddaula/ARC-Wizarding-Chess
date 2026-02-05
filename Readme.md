@@ -44,41 +44,41 @@
 
 ## AI Project Status Summary I guess:
 Current Status: The "Open Loop" System
-Your project currently functions as an "open-loop" system. This means the central computer can calculate moves and tell robots what to do, but it has no way of knowing if the robots actually did it correctly.
+Project currently functions as an "open-loop" system. This means the central computer can calculate moves and tell robots what to do, but it has no way of knowing if the robots actually did it correctly.
 
 1. Game Logic & Path Planning (Completed) The "Brain" of the project is functional.
 
-Chess Logic: The system uses the chess library to validate moves, check for checkmate/stalemate, and handle board state.
+    - Chess Logic: The system uses the chess library to validate moves, check for checkmate/stalemate, and handle board state.
 
-Path Finding: The PathPlanner class successfully generates complex paths. It handles special cases like knights moving in "L" shapes, castling, and even instructing captured pieces to leave the board.
+    Path Finding: The PathPlanner class successfully generates complex paths. It handles special cases like knights moving in "L" shapes, castling, and even instructing captured     pieces to leave the board.
 
-Voice Input: There is a working script (speech_movement.py) that uses the Sphinx library to listen for commands like "e2 to e4" and converts them into chess coordinates.
+    Voice Input: There is a working script (speech_movement.py) that uses the Sphinx library to listen for commands like "e2 to e4" and converts them into chess coordinates.
 
 2. Communication Pipeline (Completed) The "Nervous System" connects your code to the hardware.
 
-Server: PythonServer.py creates a UDP server that can send data packets to the robots over WiFi.
+    - Server: PythonServer.py creates a UDP server that can send data packets to the robots over WiFi.
 
-Robot Translation: robot_control.py translates abstract moves (e.g., "move to E4") into specific byte commands (e.g., [1, 0, distance_bytes]) that the hardware understands.
+    - Robot Translation: robot_control.py translates abstract moves (e.g., "move to E4") into specific byte commands (e.g., [1, 0, distance_bytes]) that the hardware understands.
 
-Hardware Code: You have the Arduino code (UDPSocketESP.ino) for the ESP chips to receive these packets and pass them to the robot's motor controllers.
+    - Hardware Code: You have the Arduino code (UDPSocketESP.ino) for the ESP chips to receive these packets and pass them to the robot's motor controllers.
 
 What is Missing: The "Closed Loop"
 The critical missing piece is the "Feedback Loop." Currently, the code assumes that if it tells a robot to move 10 inches, it moves exactly 10 inches. In reality, battery voltage, friction, or wheel slip will cause errors.
 
 1. Computer Vision Integration (Critical Priority)
 
-The Problem: The Robot class tracks position based on commands sent, not actual location. As noted in your Readme, game.py needs to query the computer vision system to see where the robot actually is.
+    - The Problem: The Robot class tracks position based on commands sent, not actual location. As noted in your Readme, game.py needs to query the computer vision system to see where the robot actually is.
 
-The Fix: You need to update game.py to pause after sending a move, read the camera data (April Tags), calculate the error (e.g., "Robot is 2cm to the left of center"), and send a correction command.
+    - The Fix: You need to update game.py to pause after sending a move, read the camera data (April Tags), calculate the error (e.g., "Robot is 2cm to the left of center"), and send a correction command.
 
 2. Motor Accuracy & Calibration
 
-The Problem: The Readme notes that "amount the robots move / turn ... is inconsistent".
+    - The Problem: The Readme notes that "amount the robots move / turn ... is inconsistent".
 
-The Fix: The move_profile() function mentioned in the Readme was an attempt to fix this but is unfinished. You likely need to implement a PID controller or a simple calibration factor for each specific robot ID to ensure "100 counts" equals the same distance on every robot.
+    - The Fix: The move_profile() function mentioned in the Readme was an attempt to fix this but is unfinished. You likely need to implement a PID controller or a simple calibration factor for each specific robot ID to ensure "100 counts" equals the same distance on every robot.
 
 3. Chess Bot Integration
 
-The Problem: Currently, the game relies on two humans entering moves or speaking them.
+    - The Problem: Currently, the game relies on two humans entering moves or speaking them.
 
-The Fix: The Readme lists playing against a chess engine as a "To Do". You need to integrate a library like Stockfish into game.py so the computer can generate its own moves instead of waiting for a second player.
+    - The Fix: The Readme lists playing against a chess engine as a "To Do". You need to integrate a library like Stockfish into game.py so the computer can generate its own moves instead of waiting for a second player.
