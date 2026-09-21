@@ -1,100 +1,129 @@
+
 import math
+import struct
 
-COUNTS_PER_SQUARE = 10500
-PASSWORD = bytearray([ord('W'), ord('I'), ord('Z')])
+PASSWORD = bytearray(b"WIZ")
+END_BYTE = bytearray([3])
+CMD_DRIVE = 1
 
-class Robot():
+# ---------------------------- CALIBRATION ----------------------------
+# Units are whatever Robot.position uses (the old code assumed 100 units/square).
+# Encoder counts per unit of WHEEL TRAVEL:
+#   counts_per_wheel_rev / (pi * wheel_diameter_in_units)
+# 105 is the old robot's number (10500 counts / 100 units). RECALIBRATE.
+COUNTS_PER_UNIT = 105.0
+# Distance from robot centre to each wheel's contact point, in position units.
+ROBOT_RADIUS = 10.0
+# Angle of each wheel around the robot, measured CCW from the robot's forward axis.
+WHEEL_ANGLES_DEG = (90.0, 210.0, 330.0)
+# ---------------------------------------------------------------------
+
+INT16_MAX = 32767
+
+# Unit vector along which wheel i drives the robot (tangent, CCW), robot frame.
+_WHEEL_DIRS = tuple((-math.sin(a), math.cos(a))
+                    for a in map(math.radians, WHEEL_ANGLES_DEG))
+
+
+class Robot:
 
     def __init__(self, id, position, angle, server, device_id):
         self.id = id
-        self.position = position
+        self.position = tuple(position)
         self.server = server
         self.device_id = device_id
 
         # Angle is measured counterclockwise from horizontal
-        self.angle = angle
-        self.initial_angle = angle
+        self.angle = angle % 360
+        self.initial_angle = self.angle
 
         self.buffer = bytearray()
 
     def __repr__(self):
-        return self.id
-    
-    # ALL COMMANDS ONLY ADD MOVEMENT TO BUFFER, BUT STILL AFFECT ROBOT POSITION VALUES BEFORE BUFFER IS SENT / MOVEMENT IS MADE. 
-    # send_buffer() MUST BE USED FOR COMMAND TO BE SENT TO ROBOT
-    # THIS MEANS Robot.position DOES NOT REFLECT ACTUAL POSITION OF ROBOT, THIS NEEDS TO BE DERIVED FROM COMPUTER VISION.
-    
-    # Robot.position is the hypothetical position of the robot after all buffered moves are executed
+        return str(self.id)
 
-    # BYTE ARRAY FORMAT
-    # First byte -> command (1 = move, 2 = turn)
-    # 
-    # Moving
-    # - Second/third byte -> distance 
-    #    (float distance in terms of squares or integer # of encoder counts?)
-    #
-    # Turning
-    # - Second/third byte -> angle (in degrees) (signed int)
-    # - need 2 bytes because 180 > 128 and negative values being used
+    # ------------------------------------------------------------------
+    # Low level
+    # ------------------------------------------------------------------
+    def _queue(self, counts):
+        """Append a DRIVE command for the given per-wheel counts.
 
-    def send_buffer(self):
-        if self.server:
-            self.server.send_command(self.device_id, PASSWORD + self.buffer + bytearray([3]))
-        self.buffer = bytearray()
-        
-    def move(self, distance):
-        encoder_counts = distance * COUNTS_PER_SQUARE / 100
-        command = bytearray([1, 0]) + bytearray(int(encoder_counts).to_bytes(2, byteorder="big"))
-        print(command)
-        self.buffer += command
-    
-    def turn(self, angle):
-        # 1 = clockwise, 0 = counterclockwise
-        # positive angle is counterclockwise, negative is clockwise
-        # Negative numbers are represented with two's complement, to be interpreted by arduino
-        if angle == 0:
+        Anything that doesn't fit in int16 is split into equal chunks, so long
+        moves work instead of silently overflowing.
+        """
+        peak = max(abs(c) for c in counts)
+        if peak == 0:
             return
-        
-        command_angle = int(angle if angle > 0 else -angle)
-        command = bytearray([2, 0 if angle > 0 else 1]) + bytearray(command_angle.to_bytes(1, byteorder="big")) + bytearray([0])
-        print(command)
-        self.buffer += command
-        self.angle += angle
-        self.angle = self.angle % 360
+        chunks = -(-peak // INT16_MAX)  # ceil division
+        prev = (0, 0, 0)
+        for i in range(1, chunks + 1):
+            cum = tuple(round(c * i / chunks) for c in counts)
+            self.buffer += struct.pack(">B3h", CMD_DRIVE,
+                                       *(a - b for a, b in zip(cum, prev)))
+            prev = cum
 
-    def turn_to(self, angle):
-        angle = angle % 360
-        turn_angle = angle - self.angle
-        if turn_angle > 180:
-            turn_angle = -360 + turn_angle
-        elif turn_angle < -180:
-            turn_angle = 360 + turn_angle
-        
-        self.turn(turn_angle)
+    # ------------------------------------------------------------------
+    # Motion commands (buffered)
+    # ------------------------------------------------------------------
+    def move_by(self, dx, dy):
+        """Translate by (dx, dy) in the WORLD frame, heading unchanged."""
+        if dx == 0 and dy == 0:
+            return
+        # World -> robot frame (rotate by -angle)
+        th = math.radians(self.angle)
+        c, s = math.cos(th), math.sin(th)
+        rx, ry = c * dx + s * dy, c * dy - s * dx
+        self._queue([round(COUNTS_PER_UNIT * (kx * rx + ky * ry))
+                     for kx, ky in _WHEEL_DIRS])
+        self.position = (self.position[0] + dx, self.position[1] + dy)
 
     def move_to(self, position):
-        if self.position[0] == position[0]:
-            angle = 90 if position[1] > self.position[1] else -90
-        else:
-            angle = math.degrees(math.atan((position[1] - self.position[1]) / (position[0] - self.position[0])))
+        """Straight line to a world position. No turning required."""
+        self.move_by(position[0] - self.position[0],
+                     position[1] - self.position[1])
 
-        if position[0] < self.position[0]:
-            angle += 180
-        self.turn_to(angle)
-        self.move(math.dist(self.position, position))
-        self.position = position
+    def turn(self, angle):
+        """Rotate in place. Positive = counterclockwise, negative = clockwise."""
+        if angle == 0:
+            return
+        ticks = round(COUNTS_PER_UNIT * ROBOT_RADIUS * math.radians(angle))
+        self._queue([ticks] * 3)  # all wheels same sign = pure spin
+        self.angle = (self.angle + angle) % 360
+
+    def turn_to(self, angle):
+        """Rotate to an absolute heading via the shortest direction."""
+        self.turn((angle - self.angle + 180) % 360 - 180)
 
     def face_forward(self):
         self.turn_to(self.initial_angle)
 
     def execute_path(self, path_points):
-        print(f'Moving: {self.id} from {self.position} to {path_points[-1]}')
-        for point in path_points:
-            self.move_to(point)
-            print(self.position)
-            print(self.angle)
-            print(f"Moved to {point}")
-        self.face_forward()
-        print(self.position)
-        print(self.angle)
-        print("Finished Path")
+        """Follow a list of waypoints. Collinear points are merged into a
+        single drive command, and no turns are inserted between segments."""
+        for p in self._merge_collinear(path_points):
+            self.move_to(p)
+        self.face_forward()  # no-op unless the heading was changed
+
+    def _merge_collinear(self, points, tol=1e-6):
+        merged = [self.position]
+        for p in points:
+            if p == merged[-1]:
+                continue
+            if len(merged) >= 2:
+                ax, ay = merged[-1][0] - merged[-2][0], merged[-1][1] - merged[-2][1]
+                bx, by = p[0] - merged[-1][0], p[1] - merged[-1][1]
+                same_dir = (abs(ax * by - ay * bx) <= tol * math.hypot(ax, ay) * math.hypot(bx, by)
+                            and ax * bx + ay * by > 0)
+                if same_dir:
+                    merged[-1] = p
+                    continue
+            merged.append(p)
+        return merged[1:]
+
+    # ------------------------------------------------------------------
+    def send_buffer(self):
+        """MUST be called for buffered commands to actually reach the robot."""
+        if self.server and self.buffer:
+            self.server.send_command(self.device_id,
+                                     PASSWORD + self.buffer + END_BYTE)
+        self.buffer = bytearray()
